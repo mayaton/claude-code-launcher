@@ -29,8 +29,8 @@ Options:
 Arguments:
   -- 以降の引数は claude にそのまま渡す（herdr / 非マルチプレクサモード。Zellij モードは非対応）。
 
-Environment:
-  CL_NO_DIRENV  set to any non-empty value to disable direnv integration.
+環境変数:
+  CL_NO_DIRENV  非空の値をセットすると direnv 連携を無効化する。
 EOF
 }
 
@@ -107,11 +107,14 @@ run_zellij() {
 }
 
 run_plain() {
-  require_cmd claude
   cd "$repo_path"
   if should_use_direnv; then
+    # direnv exec が .envrc で claude を PATH に足すケースがあるため、
+    # 外側の shell では claude の存在をチェックしない。
+    require_cmd direnv
     exec direnv exec . claude ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
   else
+    require_cmd claude
     exec claude ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
   fi
 }
