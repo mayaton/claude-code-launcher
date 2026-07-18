@@ -21,12 +21,16 @@ ghq 配下のリポジトリを fzf で選び、そのディレクトリで clau
 
 依存:
   ghq, fzf, claude (Claude Code), herdr + jq / zellij (それぞれの環境で使う場合のみ)
+  direnv (任意。インストールされていれば cd 先の .envrc を読み込んで claude を起動する)
 
 Options:
   -h, --help  Show this help and exit
 
 Arguments:
   -- 以降の引数は claude にそのまま渡す（herdr / 非マルチプレクサモード。Zellij モードは非対応）。
+
+環境変数:
+  CL_NO_DIRENV  非空の値をセットすると direnv 連携を無効化する。
 EOF
 }
 
@@ -46,8 +50,17 @@ require_cmd() {
   fi
 }
 
+should_use_direnv() {
+  [[ -z ${CL_NO_DIRENV:-} ]] && command -v direnv >/dev/null 2>&1
+}
+
 build_claude_cmd() {
-  local cmd="claude" arg quoted
+  local cmd arg quoted
+  if should_use_direnv; then
+    cmd="direnv exec . claude"
+  else
+    cmd="claude"
+  fi
   for arg in "$@"; do
     printf -v quoted ' %q' "$arg"
     cmd+="$quoted"
@@ -84,15 +97,26 @@ run_zellij() {
   require_cmd zellij "ZELLIJ is set but"
   local cmd
   zellij action new-tab --name "$tab_name" --cwd "$repo_path"
-  printf -v cmd 'cd %q && claude' "$repo_path"
+  if should_use_direnv; then
+    printf -v cmd 'cd %q && direnv exec . claude' "$repo_path"
+  else
+    printf -v cmd 'cd %q && claude' "$repo_path"
+  fi
   zellij action write-chars "$cmd"
   zellij action write 13
 }
 
 run_plain() {
-  require_cmd claude
   cd "$repo_path"
-  exec claude ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
+  if should_use_direnv; then
+    # direnv exec が .envrc で claude を PATH に足すケースがあるため、
+    # 外側の shell では claude の存在をチェックしない。
+    require_cmd direnv
+    exec direnv exec . claude ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
+  else
+    require_cmd claude
+    exec claude ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
+  fi
 }
 
 CLAUDE_ARGS=()
