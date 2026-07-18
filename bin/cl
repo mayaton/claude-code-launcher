@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+print_usage() {
+  cat <<EOF
+Usage:
+  cl [-- CLAUDE_ARGS...]
+
+ghq 配下のリポジトリを fzf で選び、そのディレクトリで claude を起動する。
+
+挙動:
+  - herdr セッション内（\$HERDR_PANE_ID が定義済み）:
+      リポ名の workspace が既に存在すればフォーカスし、無ければ新規作成して
+      その初期ペイン内で claude を起動する。
+  - Zellij セッション内（\$ZELLIJ が定義済み）:
+      リポ名のタブを新規作成し、その cwd で claude を起動する。
+  - それ以外:
+      現在のシェルで cd してから claude に exec する。
+
+依存:
+  ghq, fzf, claude (Claude Code), herdr + jq / zellij (それぞれの環境で使う場合のみ)
+
+Options:
+  -h, --help  Show this help and exit
+
+Arguments:
+  -- 以降の引数は claude にそのまま渡す（herdr / 非マルチプレクサモード。Zellij モードは非対応）。
+EOF
+}
+
+CLAUDE_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  -h | --help)
+    print_usage
+    exit 0
+    ;;
+  --)
+    shift
+    CLAUDE_ARGS=("$@")
+    break
+    ;;
+  *)
+    echo "Unknown argument: $1" >&2
+    print_usage >&2
+    exit 1
+    ;;
+  esac
+done
+
+for cmd in ghq fzf; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Error: '$cmd' command not found" >&2
+    exit 1
+  fi
+done
+
+ghq_root="$(ghq root)"
+repo="$(ghq list | fzf \
+  --prompt='claude> ' \
+  --height=80% \
+  --reverse \
+  --border \
+  --preview="ls -la ${ghq_root}/{}" \
+  --preview-window='right:50%:wrap')" || exit 0
+repo_path="${ghq_root}/${repo}"
+tab_name="${repo##*/}"
+
+if [[ -n ${HERDR_PANE_ID:-} ]]; then
+  for dep in herdr jq; do
+    if ! command -v "$dep" >/dev/null 2>&1; then
+      echo "Error: HERDR_PANE_ID is set but '$dep' command not found" >&2
+      exit 1
+    fi
+  done
+  workspace_id="$(herdr workspace list |
+    jq -r --arg label "$tab_name" '.result.workspaces[] | select(.label==$label) | .workspace_id' |
+    head -n1)"
+  if [[ -n $workspace_id ]]; then
+    herdr workspace focus "$workspace_id" >/dev/null
+  else
+    workspace_id="$(herdr workspace create --cwd "$repo_path" --label "$tab_name" --focus |
+      jq -r '.result.workspace.workspace_id // .result.workspace_id // .result.workspace.id // empty')"
+    if [[ -z $workspace_id ]]; then
+      echo "Error: failed to create herdr workspace" >&2
+      exit 1
+    fi
+    pane_id="$(herdr pane list --workspace "$workspace_id" |
+      jq -r '.result.panes[0].pane_id // empty')"
+    if [[ -z $pane_id ]]; then
+      echo "Error: failed to locate default pane in workspace $workspace_id" >&2
+      exit 1
+    fi
+    cmd="claude"
+    if [[ ${#CLAUDE_ARGS[@]} -gt 0 ]]; then
+      for arg in "${CLAUDE_ARGS[@]}"; do
+        printf -v quoted ' %q' "$arg"
+        cmd+="$quoted"
+      done
+    fi
+    herdr pane run "$pane_id" "$cmd" >/dev/null
+  fi
+elif [[ -n ${ZELLIJ:-} ]]; then
+  if ! command -v zellij >/dev/null 2>&1; then
+    echo "Error: ZELLIJ is set but 'zellij' command not found" >&2
+    exit 1
+  fi
+  zellij action new-tab --name "$tab_name" --cwd "$repo_path"
+  printf -v cmd 'cd %q && claude' "$repo_path"
+  zellij action write-chars "$cmd"
+  zellij action write 13
+else
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "Error: 'claude' command not found" >&2
+    exit 1
+  fi
+  cd "$repo_path"
+  exec claude ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
+fi
