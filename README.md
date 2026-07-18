@@ -51,4 +51,4 @@ cl [-- CLAUDE_ARGS...]
 CL_NO_DIRENV=1 cl
 ```
 
-`.envrc` が未 allow 状態の場合は direnv が警告を出すが、`claude` の起動自体は続行する。初回のみ `direnv allow` の実行が必要。
+対象ディレクトリの `.envrc` が未 allow の場合、`cl` は `claude` を起動せずガイドを出して終了する。`claude` は TUI で画面をクリアするため、direnv の警告を出して起動を続行しても見えないためだ。案内に従って中身を確認し `direnv allow <path>` を実行してから `cl` を再実行する。

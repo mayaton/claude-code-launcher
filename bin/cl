@@ -21,7 +21,8 @@ ghq 配下のリポジトリを fzf で選び、そのディレクトリで clau
 
 依存:
   ghq, fzf, claude (Claude Code), herdr + jq / zellij (それぞれの環境で使う場合のみ)
-  direnv (任意。インストールされていれば cd 先の .envrc を読み込んで claude を起動する)
+  direnv (任意。インストールされていれば cd 先の .envrc を読み込んで claude を起動する。
+          未 allow の .envrc を検出した場合は claude を起動せずガイドを出して終了する)
 
 Options:
   -h, --help  Show this help and exit
@@ -52,6 +53,28 @@ require_cmd() {
 
 should_use_direnv() {
   [[ -z ${CL_NO_DIRENV:-} ]] && command -v direnv >/dev/null 2>&1
+}
+
+# 未 allow の .envrc を検出したら、ガイドを出して非ゼロで終了する。
+# claude が TUI で画面をクリアするため、警告を出して続行しても見えない。
+ensure_direnv_allowed() {
+  should_use_direnv || return 0
+  [[ -e "$repo_path/.envrc" ]] || return 0
+  local status_output allowed
+  status_output="$(cd "$repo_path" && direnv status 2>/dev/null)" || return 0
+  grep -q '^Found RC path ' <<<"$status_output" || return 0
+  allowed="$(grep -E '^Found RC allowed ' <<<"$status_output" | awk '{print $NF}')"
+  [[ $allowed == "0" ]] && return 0
+  local reason="not allowed"
+  [[ $allowed == "2" ]] && reason="denied"
+  cat >&2 <<EOF
+cl: ${repo_path}/.envrc is ${reason} by direnv.
+cl: review the file and allow it, then re-run cl:
+cl:   cat ${repo_path}/.envrc
+cl:   direnv allow ${repo_path}/.envrc
+cl: (set CL_NO_DIRENV=1 to skip direnv integration.)
+EOF
+  exit 1
 }
 
 build_claude_cmd() {
@@ -152,6 +175,8 @@ repo="$(ghq list | fzf \
   --preview-window='right:50%:wrap')" || exit 0
 repo_path="${ghq_root}/${repo}"
 tab_name="${repo##*/}"
+
+ensure_direnv_allowed
 
 if [[ -n ${HERDR_PANE_ID:-} ]]; then
   run_herdr
