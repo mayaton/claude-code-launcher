@@ -55,8 +55,6 @@ should_use_direnv() {
   [[ -z ${CL_NO_DIRENV:-} ]] && command -v direnv >/dev/null 2>&1
 }
 
-# 未 allow の .envrc を検出したら、ガイドを出して非ゼロで終了する。
-# claude が TUI で画面をクリアするため、警告を出して続行しても見えない。
 ensure_direnv_allowed() {
   should_use_direnv || return 0
   [[ -e "$repo_path/.envrc" ]] || return 0
@@ -132,8 +130,6 @@ run_zellij() {
 run_plain() {
   cd "$repo_path"
   if should_use_direnv; then
-    # direnv exec が .envrc で claude を PATH に足すケースがあるため、
-    # 外側の shell では claude の存在をチェックしない。
     require_cmd direnv
     exec direnv exec . claude ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
   else
